@@ -63,7 +63,7 @@ df['Volume Adjusted Return'] = df['Position'] * df['Actual Price'].pct_change()
 
 # Apply a dynamic volume multiplier for buy signals based on volume percentiles
 high_volume_threshold = df['Volume'].quantile(0.9)
-df['Volume Multiplier'] = df['Volume'].apply(lambda x: 0.32 if x > high_volume_threshold else 5 if x < volume_threshold else 1)
+df['Volume Multiplier'] = df['Volume'].apply(lambda x: 0.32 if x > high_volume_threshold else 10 if x < volume_threshold else 1)
 
 df['Volume Adjusted Return'] *= df['Volume Multiplier']
 
