@@ -37,33 +37,34 @@ volume_threshold = df['Volume'].quantile(0.31)  # Using 31st percentile as thres
 df.loc[df['Volume'] < volume_threshold, 'Signal'] = 0  # No trade if volume is below threshold
 
 # Implement simple static take-profit
-take_profit_threshold = 0.05  # 5% take-profit
+take_profit_threshold = 0.07  # 5% take-profit
 take_profit_triggered_count = 0
 
 for i in range(1, len(df)):
     if df.loc[i-1, 'Signal'] == 1:  # Buy signal
         entry_price = df.loc[i-1, 'Actual Price']
         take_profit_level = entry_price * (1 + take_profit_threshold)
-        print(f"New entry Price set at {entry_price} with take profit level at {take_profit_level}")
+        #print(f"New entry Price set at {entry_price} with take profit level at {take_profit_level}")
         
         for j in range(i, len(df)):
             if df.loc[j, 'Actual Price'] > take_profit_level:
                 df.loc[j, 'Signal'] = 0  # Exit position if price exceeds take-profit level
-                print(f"Take-profit triggered: Exit at {df.loc[j, 'Actual Price']} on {df.loc[j, 'Date']}")
+                #print(f"Take-profit triggered: Exit at {df.loc[j, 'Actual Price']} on {df.loc[j, 'Date']}")
                 take_profit_triggered_count += 1
                 break
             if df.loc[j, 'Signal'] == 1:  # Update entry price on new buy signal
                 entry_price = df.loc[j, 'Actual Price']
                 take_profit_level = entry_price * (1 + take_profit_threshold)
-                print(f"New entry Price set at {entry_price} with take profit level at {take_profit_level}")
+                #print(f"New entry Price set at {entry_price} with take profit level at {take_profit_level}")
 
 # Implement strategy returns with a dynamic volume multiplier for buy signals
 df['Position'] = df['Signal'].shift(1)
 df['Volume Adjusted Return'] = df['Position'] * df['Actual Price'].pct_change()
 
 # Apply a dynamic volume multiplier for buy signals based on volume percentiles
-high_volume_threshold = df['Volume'].quantile(0.75)
-df['Volume Multiplier'] = df['Volume'].apply(lambda x: 0.4 if x > high_volume_threshold else 1)
+high_volume_threshold = df['Volume'].quantile(0.9)
+df['Volume Multiplier'] = df['Volume'].apply(lambda x: 0.32 if x > high_volume_threshold else 5 if x < volume_threshold else 1)
+
 df['Volume Adjusted Return'] *= df['Volume Multiplier']
 
 # Calculate cumulative returns
