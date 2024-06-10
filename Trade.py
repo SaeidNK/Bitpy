@@ -28,6 +28,10 @@ df = pd.DataFrame({
 # Reset index to ensure it's contiguous
 df.reset_index(drop=True, inplace=True)
 
+# Transaction fees
+maker_fee = 0.0008  # 0.08%
+taker_fee = 0.001  # 0.10%
+
 # Generate buy (1) signals based on model predictions
 df['Signal'] = 0
 df.loc[df['Predictions'] > df['Actual Price'], 'Signal'] = 1  # Buy signal
@@ -37,25 +41,22 @@ volume_threshold = df['Volume'].quantile(0.31)  # Using 31st percentile as thres
 df.loc[df['Volume'] < volume_threshold, 'Signal'] = 0  # No trade if volume is below threshold
 
 # Implement simple static take-profit
-take_profit_threshold = 0.07  # 5% take-profit
+take_profit_threshold = 0.07  # 7% take-profit
 take_profit_triggered_count = 0
 
 for i in range(1, len(df)):
     if df.loc[i-1, 'Signal'] == 1:  # Buy signal
         entry_price = df.loc[i-1, 'Actual Price']
         take_profit_level = entry_price * (1 + take_profit_threshold)
-        #print(f"New entry Price set at {entry_price} with take profit level at {take_profit_level}")
         
         for j in range(i, len(df)):
             if df.loc[j, 'Actual Price'] > take_profit_level:
                 df.loc[j, 'Signal'] = 0  # Exit position if price exceeds take-profit level
-                #print(f"Take-profit triggered: Exit at {df.loc[j, 'Actual Price']} on {df.loc[j, 'Date']}")
                 take_profit_triggered_count += 1
                 break
             if df.loc[j, 'Signal'] == 1:  # Update entry price on new buy signal
                 entry_price = df.loc[j, 'Actual Price']
                 take_profit_level = entry_price * (1 + take_profit_threshold)
-                #print(f"New entry Price set at {entry_price} with take profit level at {take_profit_level}")
 
 # Implement strategy returns with a dynamic volume multiplier for buy signals
 df['Position'] = df['Signal'].shift(1)
@@ -63,18 +64,22 @@ df['Volume Adjusted Return'] = df['Position'] * df['Actual Price'].pct_change()
 
 # Apply a dynamic volume multiplier for buy signals based on volume percentiles
 high_volume_threshold = df['Volume'].quantile(0.9)
-df['Volume Multiplier'] = df['Volume'].apply(lambda x: 0.32 if x > high_volume_threshold else 10 if x < volume_threshold else 1)
+df['Volume Multiplier'] = df['Volume'].apply(lambda x: 0.32 if x > high_volume_threshold else 7 if x < volume_threshold else 1)
 
 df['Volume Adjusted Return'] *= df['Volume Multiplier']
 
+# Calculate transaction costs
+df['Transaction Cost'] = df['Position'].shift(1) * (maker_fee + taker_fee)
+df['Net Return'] = df['Volume Adjusted Return'] - df['Transaction Cost']
+
 # Calculate cumulative returns
 df['Cumulative Market Returns'] = (1 + df['Actual Price'].pct_change()).cumprod()
-df['Cumulative Strategy Returns'] = (1 + df['Volume Adjusted Return']).cumprod()
+df['Cumulative Strategy Returns'] = (1 + df['Net Return']).cumprod()
 
 # Calculate performance metrics
 total_return = df['Cumulative Strategy Returns'].iloc[-1] - 1
 annualized_return = (1 + total_return) ** (365 / 300) - 1
-annualized_volatility = df['Volume Adjusted Return'].std() * np.sqrt(365)
+annualized_volatility = df['Net Return'].std() * np.sqrt(365)
 sharpe_ratio = (annualized_return - 0.02) / annualized_volatility if annualized_volatility != 0 else 0
 max_drawdown = (df['Cumulative Strategy Returns'].cummax() - df['Cumulative Strategy Returns']).max()
 
