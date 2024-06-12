@@ -82,6 +82,23 @@ def calculate_indicators(df):
     
     df['Adj Close'] = df['Close']  # Assuming 'Adj Close' is same as 'Close' for this context
     
+    # Calculate ATR (Average True Range) for dynamic stop loss and take profit levels
+    df['TR'] = df[['High', 'Low', 'Close']].max(axis=1) - df[['High', 'Low', 'Close']].min(axis=1)
+    df['ATR'] = df['TR'].rolling(window=14).mean()
+
+    # Calculate Bollinger Bands
+    df['Upper Band'] = df['rolling_mean_20'] + (df['rolling_std_20'] * 2)
+    df['Lower Band'] = df['rolling_mean_20'] - (df['rolling_std_20'] * 2)
+
+    # Calculate ADX (Average Directional Index)
+    df['+DM'] = np.where((df['High'] - df['High'].shift(1)) > (df['Low'].shift(1) - df['Low']), df['High'] - df['High'].shift(1), 0)
+    df['-DM'] = np.where((df['Low'].shift(1) - df['Low']) > (df['High'] - df['High'].shift(1)), df['Low'].shift(1) - df['Low'], 0)
+    df['TR'] = np.max([df['High'] - df['Low'], np.abs(df['High'] - df['Close'].shift(1)), np.abs(df['Low'] - df['Close'].shift(1))], axis=0)
+    df['+DI'] = 100 * (df['+DM'].ewm(alpha=1/14).mean() / df['TR'].ewm(alpha=1/14).mean())
+    df['-DI'] = 100 * (df['-DM'].ewm(alpha=1/14).mean() / df['TR'].ewm(alpha=1/14).mean())
+    df['DX'] = 100 * np.abs((df['+DI'] - df['-DI']) / (df['+DI'] + df['-DI']))
+    df['ADX'] = df['DX'].ewm(alpha=1/14).mean()
+
     return df
 
 def apply_trading_strategy(df):
@@ -90,23 +107,33 @@ def apply_trading_strategy(df):
         X_test = df.drop(columns=["Close", "Date"]).tail(300)
         df['Predictions'] = ridge_regression.predict(X_test)
 
-        # Generate buy (1) signals based on model predictions
+        # Calculate volume threshold before using it
+        volume_threshold = df['Volume'].quantile(0.20)  # Using 20th percentile as threshold
+
+        # Generate buy (1) signals based on model predictions and Bollinger Bands confirmation
         df['Signal'] = 0
-        df.loc[df['Predictions'] > df['Close'], 'Signal'] = 1  # Buy signal
+        df.loc[(df['Predictions'] > df['Close']) & (df['Close'] > df['SMA_10']) & (df['Close'] < df['Upper Band']) & (df['ADX'] > 20) & (df['RSI'] < 70) & (df['Volume'] > volume_threshold), 'Signal'] = 1  # Added RSI and volume filter
 
-        # Apply volume filter
-        volume_threshold = df['Volume'].quantile(0.31)  # Using 31st percentile as threshold
-        df.loc[df['Volume'] < volume_threshold, 'Signal'] = 0  # No trade if volume is below threshold
+        # Apply a smoothing filter to reduce noise (e.g., exponential moving average on the signals)
+        df['Signal'] = df['Signal'].ewm(span=3, adjust=False).mean().round()  # Smoothing the signal
 
-        # Calculate take profit and stop loss levels
-        df['Take Profit'] = df['Close'] * (1 + take_profit_threshold)
-        df['Stop Loss'] = df['Close'] * (1 - take_profit_threshold)
+        # Increase the stop loss multiplier
+        stop_loss_multiplier = 3  # Increased stop loss multiplier to 3 times the ATR
+        take_profit_multiplier = 2  # Adjust take profit multiplier if needed
+
+        # Calculate dynamic take profit and stop loss levels using ATR
+        df['Take Profit'] = df['Close'] + df['ATR'] * take_profit_multiplier
+        df['Stop Loss'] = df['Close'] - df['ATR'] * stop_loss_multiplier
 
         # Calculate the amount to buy
         df['Amount to Buy'] = (available_capital * risk_per_trade) / (df['Close'] - df['Stop Loss'])
 
         # Calculate the possible profit percentage
         df['Possible Profit %'] = ((df['Take Profit'] - df['Close']) / df['Close']) * 100
+
+        # Implement a volatility filter to avoid trading during high volatility periods
+        volatility_threshold = df['ATR'].mean() * 1.5  # Example threshold; adjust as needed
+        df.loc[df['ATR'] > volatility_threshold, 'Signal'] = 0
 
         # Identify correct and false buy signals
         df['Correct Signal'] = np.nan
