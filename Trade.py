@@ -30,7 +30,7 @@ df.reset_index(drop=True, inplace=True)
 
 # Transaction fees
 maker_fee = 0.0008  # 0.08%
-taker_fee = 0.001  # 0.10%
+taker_fee = 0.0007  # 0.7%
 
 # Generate buy (1) signals based on model predictions
 df['Signal'] = 0
@@ -41,7 +41,7 @@ volume_threshold = df['Volume'].quantile(0.31)  # Using 31st percentile as thres
 df.loc[df['Volume'] < volume_threshold, 'Signal'] = 0  # No trade if volume is below threshold
 
 # Implement simple static take-profit
-take_profit_threshold = 0.07  # 7% take-profit
+take_profit_threshold = 0.08  # 9% take-profit
 take_profit_triggered_count = 0
 
 for i in range(1, len(df)):
@@ -64,7 +64,7 @@ df['Volume Adjusted Return'] = df['Position'] * df['Actual Price'].pct_change()
 
 # Apply a dynamic volume multiplier for buy signals based on volume percentiles
 high_volume_threshold = df['Volume'].quantile(0.9)
-df['Volume Multiplier'] = df['Volume'].apply(lambda x: 0.32 if x > high_volume_threshold else 7 if x < volume_threshold else 1)
+df['Volume Multiplier'] = df['Volume'].apply(lambda x: 0.32 if x > high_volume_threshold else 10 if x < volume_threshold else 1)
 
 df['Volume Adjusted Return'] *= df['Volume Multiplier']
 
