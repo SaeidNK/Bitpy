@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from joblib import load
+import matplotlib.pyplot as plt
 
 # Load environment variables
 load_dotenv()
@@ -107,6 +108,18 @@ def apply_trading_strategy(df):
         # Calculate the possible profit percentage
         df['Possible Profit %'] = ((df['Take Profit'] - df['Close']) / df['Close']) * 100
 
+        # Identify correct and false buy signals
+        df['Correct Signal'] = np.nan
+        for i in range(len(df)):
+            if df.loc[i, 'Signal'] == 1:
+                for j in range(i + 1, len(df)):
+                    if df.loc[j, 'High'] >= df.loc[i, 'Take Profit']:
+                        df.loc[i, 'Correct Signal'] = True
+                        break
+                    if df.loc[j, 'Low'] <= df.loc[i, 'Stop Loss']:
+                        df.loc[i, 'Correct Signal'] = False
+                        break
+
         print("Applied trading strategy")
         return df
     else:
@@ -117,7 +130,7 @@ def display_signals(df):
     if df is not None:
         signals = df[df['Signal'] == 1]
         print("Generated Signals for Last Month:")
-        signals_to_print = signals[['Date', 'Volume', 'Close', 'Take Profit', 'Stop Loss', 'Amount to Buy', 'Possible Profit %']]
+        signals_to_print = signals[['Date', 'Volume', 'Close', 'Take Profit', 'Stop Loss', 'Amount to Buy', 'Possible Profit %', 'Correct Signal']]
         print(signals_to_print)
         
         # Save the signals to a CSV file
@@ -125,9 +138,28 @@ def display_signals(df):
         
         live_price = get_live_price()
         print(f"Live Price: {live_price}")
+
+        # Plotting the signals on a chart
+        plt.figure(figsize=(14, 7))
+        plt.plot(df['Date'], df['Close'], label='Close Price')
+        
+        # Plot correct buy signals in green and false buy signals in red
+        correct_signals = df[df['Correct Signal'] == True]
+        false_signals = df[df['Correct Signal'] == False]
+        
+        plt.scatter(correct_signals['Date'], correct_signals['Close'], marker='^', color='g', label='Correct Buy Signal', alpha=1)
+        plt.scatter(false_signals['Date'], false_signals['Close'], marker='v', color='r', label='False Buy Signal', alpha=1)
+        
+        plt.xlabel('Date')
+        plt.ylabel('Price')
+        plt.title('Close Price with Buy Signals')
+        plt.legend()
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig('signals_chart.png')  # Save the chart as a PNG file
+        plt.show()
     else:
         print("No data to display signals.")
-
 
 def get_live_price():
     response = requests.get(BASE_URL + 'public/get-ticker', params={'instrument_name': symbol})
