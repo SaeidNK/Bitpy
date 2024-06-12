@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from joblib import load
 import matplotlib.pyplot as plt
+import subprocess
 
 # Load environment variables
 load_dotenv()
@@ -17,6 +18,7 @@ API_SECRET = os.getenv('CRYPTO_API_SECRET')
 BASE_URL = "https://api.crypto.com/v2/"
 
 # Load the trained Ridge Regression model
+result = subprocess.run(['python', 'Bitprep.py'], capture_output=True, text=True)
 ridge_regression = load('ridge_regression_model.joblib')
 
 # Define trading parameters
@@ -112,7 +114,12 @@ def apply_trading_strategy(df):
 
         # Generate buy (1) signals based on model predictions and Bollinger Bands confirmation
         df['Signal'] = 0
-        df.loc[(df['Predictions'] > df['Close']) & (df['Close'] > df['SMA_10']) & (df['Close'] < df['Upper Band']) & (df['ADX'] > 20) & (df['RSI'] < 70) & (df['Volume'] > volume_threshold), 'Signal'] = 1  # Added RSI and volume filter
+        df.loc[(df['Predictions'] > df['Close']) & 
+               (df['Close'] > df['SMA_10']) & 
+               (df['Close'] < df['Upper Band']) & 
+               (df['ADX'] > 20) & 
+               (df['RSI'] < 70) & 
+               (df['Volume'] > volume_threshold), 'Signal'] = 1  # Added RSI and volume filter
 
         # Apply a smoothing filter to reduce noise (e.g., exponential moving average on the signals)
         df['Signal'] = df['Signal'].ewm(span=3, adjust=False).mean().round()  # Smoothing the signal
@@ -163,9 +170,6 @@ def display_signals(df):
         # Save the signals to a CSV file
         signals_to_print.to_csv('signals.csv', index=False)
         
-        live_price = get_live_price()
-        print(f"Live Price: {live_price}")
-
         # Plotting the signals on a chart
         plt.figure(figsize=(14, 7))
         plt.plot(df['Date'], df['Close'], label='Close Price')
@@ -212,7 +216,23 @@ def trading_bot():
             live_price = get_live_price()
             if live_price is not None:
                 print(f"Live Price: {live_price}")
-                # Update with new data for live trading signal generation if needed
+
+                # Append live price to the dataframe
+                new_row = pd.DataFrame({'Date': [datetime.now()], 'Close': [live_price]})
+                df = pd.concat([df, new_row], ignore_index=True)
+
+                # Recalculate indicators and predict
+                # Load the preprocessed data
+                data = pd.read_csv("preprocessed_Bitdata.csv")
+
+                # Use the last 100 days for testing
+                X_test = data.drop(columns=["Close", "Date"]).tail(100)
+                #X_test = df.drop(columns=["Close", "Date"]).tail(1)
+                live_prediction = ridge_regression.predict(X_test)[0]
+                print(f"Live Prediction: {live_prediction}")
+
+                # Display the live price and prediction
+                print(f"Live Price: {live_price}, Live Prediction: {live_prediction}")
             time.sleep(60)  # Check live price every minute
         except Exception as e:
             print(f"An error occurred: {e}")
