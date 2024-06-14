@@ -9,9 +9,6 @@ Welcome to BitPy, a machine learning project aimed at predicting Bitcoin prices 
 - [Technologies Used](#technologies-used)
 - [Installation](#installation)
 - [Usage](#usage)
-- [Results](#results)
-- [Contributing](#contributing)
-- [License](#license)
 
 ## Project Overview
 
