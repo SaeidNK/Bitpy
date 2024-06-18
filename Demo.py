@@ -214,7 +214,7 @@ def trading_bot():
     df = get_market_data(days=30)
     if df is not None:
         df = apply_trading_strategy(df)
-        display_signals(df)
+        #display_signals(df)
     else:
         print("Failed to fetch market data. Skipping this iteration.")
 
