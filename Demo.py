@@ -85,7 +85,7 @@ def calculate_indicators(df):
     df['Adj Close'] = df['Close']  # Assuming 'Adj Close' is same as 'Close' for this context
     
     # Calculate ATR (Average True Range) for dynamic stop loss and take profit levels
-    df['TR'] = df[['High', 'Low', 'Close']].max(axis=1) - df[['High', 'Low', 'Close']].min(axis=1)
+    df['TR'] = np.maximum((df['High'] - df['Low']), np.maximum(abs(df['High'] - df['Close'].shift(1)), abs(df['Low'] - df['Close'].shift(1))))
     df['ATR'] = df['TR'].rolling(window=14).mean()
 
     # Calculate Bollinger Bands
@@ -95,7 +95,7 @@ def calculate_indicators(df):
     # Calculate ADX (Average Directional Index)
     df['+DM'] = np.where((df['High'] - df['High'].shift(1)) > (df['Low'].shift(1) - df['Low']), df['High'] - df['High'].shift(1), 0)
     df['-DM'] = np.where((df['Low'].shift(1) - df['Low']) > (df['High'] - df['High'].shift(1)), df['Low'].shift(1) - df['Low'], 0)
-    df['TR'] = np.max([df['High'] - df['Low'], np.abs(df['High'] - df['Close'].shift(1)), np.abs(df['Low'] - df['Close'].shift(1))], axis=0)
+    df['TR'] = np.maximum((df['High'] - df['Low']), np.maximum(abs(df['High'] - df['Close'].shift(1)), abs(df['Low'] - df['Close'].shift(1))))
     df['+DI'] = 100 * (df['+DM'].ewm(alpha=1/14).mean() / df['TR'].ewm(alpha=1/14).mean())
     df['-DI'] = 100 * (df['-DM'].ewm(alpha=1/14).mean() / df['TR'].ewm(alpha=1/14).mean())
     df['DX'] = 100 * np.abs((df['+DI'] - df['-DI']) / (df['+DI'] + df['-DI']))
@@ -148,10 +148,10 @@ def apply_trading_strategy(df):
             if df.loc[i, 'Signal'] == 1:
                 for j in range(i + 1, len(df)):
                     if df.loc[j, 'High'] >= df.loc[i, 'Take Profit']:
-                        df.loc[i, 'Correct Signal'] = True
+                        df.loc[i, 'Correct Signal'] = 1  # Cast to int
                         break
                     if df.loc[j, 'Low'] <= df.loc[i, 'Stop Loss']:
-                        df.loc[i, 'Correct Signal'] = False
+                        df.loc[i, 'Correct Signal'] = 0  # Cast to int
                         break
 
         print("Applied trading strategy")
@@ -160,9 +160,10 @@ def apply_trading_strategy(df):
         print("Dataframe is None. Skipping strategy application.")
         return df
 
-def display_signals(df):
+def display_signals(df, live_price=None, live_prediction=None):
     if df is not None:
-        signals = df[df['Signal'] == 1]
+        last_month = datetime.now() - timedelta(days=30)
+        signals = df[(df['Signal'] == 1) & (df['Date'] >= last_month)]
         print("Generated Signals for Last Month:")
         signals_to_print = signals[['Date', 'Volume', 'Close', 'Take Profit', 'Stop Loss', 'Amount to Buy', 'Possible Profit %', 'Correct Signal']]
         print(signals_to_print)
@@ -175,11 +176,17 @@ def display_signals(df):
         plt.plot(df['Date'], df['Close'], label='Close Price')
         
         # Plot correct buy signals in green and false buy signals in red
-        correct_signals = df[df['Correct Signal'] == True]
-        false_signals = df[df['Correct Signal'] == False]
+        correct_signals = df[df['Correct Signal'] == 1]
+        false_signals = df[df['Correct Signal'] == 0]
         
         plt.scatter(correct_signals['Date'], correct_signals['Close'], marker='^', color='g', label='Correct Buy Signal', alpha=1)
         plt.scatter(false_signals['Date'], false_signals['Close'], marker='v', color='r', label='False Buy Signal', alpha=1)
+        
+        if live_price is not None:
+            plt.scatter([datetime.now()], [live_price], marker='o', color='b', label='Live Price', alpha=1)
+        
+        if live_prediction is not None:
+            plt.scatter([datetime.now()], [live_prediction], marker='x', color='m', label='Live Prediction', alpha=1)
         
         plt.xlabel('Date')
         plt.ylabel('Price')
@@ -218,21 +225,43 @@ def trading_bot():
                 print(f"Live Price: {live_price}")
 
                 # Append live price to the dataframe
-                new_row = pd.DataFrame({'Date': [datetime.now()], 'Close': [live_price]})
+                new_row = pd.DataFrame({'Date': [datetime.now()], 'Close': [live_price], 'Volume': [df['Volume'].mean()]})
                 df = pd.concat([df, new_row], ignore_index=True)
 
                 # Recalculate indicators and predict
-                # Load the preprocessed data
+                df = calculate_indicators(df)
                 data = pd.read_csv("preprocessed_Bitdata.csv")
-
-                # Use the last 100 days for testing
                 X_test = data.drop(columns=["Close", "Date"]).tail(100)
-                #X_test = df.drop(columns=["Close", "Date"]).tail(1)
                 live_prediction = ridge_regression.predict(X_test)[0]
                 print(f"Live Prediction: {live_prediction}")
 
-                # Display the live price and prediction
-                print(f"Live Price: {live_price}, Live Prediction: {live_prediction}")
+                # Check if new signals should be generated
+                current_conditions = {
+                    "Prediction > Price": live_prediction > live_price,
+                    "Price > SMA_10": live_price > df.iloc[-1]['SMA_10'],
+                    "Price < Upper Band": live_price < df.iloc[-1]['Upper Band'],
+                    "ADX > 20": df.iloc[-1]['ADX'] > 20,
+                    "RSI < 70": df.iloc[-1]['RSI'] < 70,
+                    "Volume > Threshold": df.iloc[-1]['Volume'] > volume_threshold
+                }
+
+                if all(current_conditions.values()):
+                    print("Conditions met for a new signal.")
+                else:
+                    unmet_conditions = [condition for condition, met in current_conditions.items() if not met]
+                    print(f"No new signal due to: {', '.join(unmet_conditions)}")
+                    # Display the values of the variables
+                    for condition, met in current_conditions.items():
+                        column_name = condition.split(' ')[0]
+                        if column_name == 'Prediction':
+                            print(f"{condition}: {met}, Value: {live_prediction}")
+                        elif column_name == 'Price':
+                            print(f"{condition}: {met}, Value: {live_price}")
+                        else:
+                            print(f"{condition}: {met}, Value: {df.iloc[-1][column_name]}")
+                        
+                # Call display_signals with live data
+                display_signals(df, live_price=live_price, live_prediction=live_prediction)
             time.sleep(60)  # Check live price every minute
         except Exception as e:
             print(f"An error occurred: {e}")
