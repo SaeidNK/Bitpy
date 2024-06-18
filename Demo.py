@@ -165,33 +165,45 @@ def display_signals(df, live_price=None, live_prediction=None):
         last_month = datetime.now() - timedelta(days=30)
         signals = df[(df['Signal'] == 1) & (df['Date'] >= last_month)]
         print("Generated Signals for Last Month:")
-        signals_to_print = signals[['Date', 'Volume', 'Close', 'Take Profit', 'Stop Loss', 'Amount to Buy', 'Possible Profit %', 'Correct Signal']]
+        signals_to_print = signals[['Date', 'Volume', 'Close', 'Take Profit', 'Stop Loss', 'Amount to Buy', 'Possible Profit %', 'Correct Signal', 'Predictions']]
         print(signals_to_print)
         
         # Save the signals to a CSV file
         signals_to_print.to_csv('signals.csv', index=False)
         
         # Plotting the signals on a chart
-        plt.figure(figsize=(14, 7))
-        plt.plot(df['Date'], df['Close'], label='Close Price')
+        fig, ax1 = plt.subplots(figsize=(14, 7))
         
-        # Plot correct buy signals in green and false buy signals in red
+        # Plot Close Price
+        ax1.plot(df['Date'], df['Close'], label='Close Price', color='blue')
+        ax1.set_xlabel('Date')
+        ax1.set_ylabel('Close Price', color='blue')
+        ax1.tick_params(axis='y', labelcolor='blue')
+        
+        # Plot Correct and False Buy Signals
         correct_signals = df[df['Correct Signal'] == 1]
         false_signals = df[df['Correct Signal'] == 0]
+        ax1.scatter(correct_signals['Date'], correct_signals['Close'], marker='^', color='green', label='Correct Buy Signal', alpha=1)
+        ax1.scatter(false_signals['Date'], false_signals['Close'], marker='v', color='red', label='False Buy Signal', alpha=1)
         
-        plt.scatter(correct_signals['Date'], correct_signals['Close'], marker='^', color='g', label='Correct Buy Signal', alpha=1)
-        plt.scatter(false_signals['Date'], false_signals['Close'], marker='v', color='r', label='False Buy Signal', alpha=1)
-        
+        # Plot Live Price
         if live_price is not None:
-            plt.scatter([datetime.now()], [live_price], marker='o', color='b', label='Live Price', alpha=1)
+            ax1.scatter([datetime.now()], [live_price], marker='o', color='blue', label='Live Price', alpha=1)
         
+        # Create another y-axis to plot the Predictions
+        ax2 = ax1.twinx()
+        ax2.plot(df['Date'], df['Predictions'], label='Predicted Price', linestyle='--', color='orange')
+        ax2.set_ylabel('Predicted Price', color='orange')
+        ax2.tick_params(axis='y', labelcolor='orange')
+        
+        # Plot Live Prediction
         if live_prediction is not None:
-            plt.scatter([datetime.now()], [live_prediction], marker='x', color='m', label='Live Prediction', alpha=1)
+            ax2.scatter([datetime.now()], [live_prediction], marker='x', color='magenta', label='Live Prediction', alpha=1)
         
-        plt.xlabel('Date')
-        plt.ylabel('Price')
-        plt.title('Close Price with Buy Signals')
-        plt.legend()
+        # Title and Legend
+        fig.suptitle('Close Price with Buy Signals and Predictions')
+        fig.legend(loc='upper left', bbox_to_anchor=(0.1,0.9))
+        
         plt.xticks(rotation=45)
         plt.tight_layout()
         plt.savefig('signals_chart.png')  # Save the chart as a PNG file
@@ -244,7 +256,7 @@ def trading_bot():
                     "RSI < 70": df.iloc[-1]['RSI'] < 70,
                     "Volume > Threshold": df.iloc[-1]['Volume'] > volume_threshold
                 }
-
+                
                 if all(current_conditions.values()):
                     print("Conditions met for a new signal.")
                 else:
