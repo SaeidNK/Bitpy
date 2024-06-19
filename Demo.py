@@ -113,9 +113,9 @@ def apply_trading_strategy(df):
                (df['Volume'] > volume_threshold), 'Signal'] = 1
 
         df['Signal'] = df['Signal'].ewm(span=3, adjust=False).mean().round()
-
-        stop_loss_multiplier = 3
-        take_profit_multiplier = 2
+        
+        stop_loss_multiplier = 2
+        take_profit_multiplier = 1
 
         df['Take Profit'] = df['Close'] + df['ATR'] * take_profit_multiplier
         df['Stop Loss'] = df['Close'] - df['ATR'] * stop_loss_multiplier
@@ -138,7 +138,12 @@ def apply_trading_strategy(df):
                         df.loc[i, 'Correct Signal'] = 0
                         break
 
-        print("Applied trading strategy")
+        # Save the signals to a CSV file
+        signals = df[df['Signal'] == 1]
+        signals_to_save = signals[['Date', 'Volume', 'Close', 'Take Profit', 'Stop Loss', 'Amount to Buy', 'Possible Profit %', 'Correct Signal']]
+        signals_to_save.to_csv('signals.csv', index=False)
+
+        print("Applied trading strategy and saved signals to signals.csv")
         return df
     else:
         print("Dataframe is None. Skipping strategy application.")
@@ -179,14 +184,7 @@ def evaluate_trading_bot(df):
 
 def display_signals(df, live_price=None):
     if df is not None:
-        last_month = datetime.now() - timedelta(days=30)
-        signals = df[(df['Signal'] == 1) & (df['Date'] >= last_month)]
-        print("Generated Signals for Last Month:")
-        signals_to_print = signals[['Date', 'Volume', 'Close', 'Take Profit', 'Stop Loss', 'Amount to Buy', 'Possible Profit %', 'Correct Signal']]
-        print(signals_to_print)
-        
-        signals_to_print.to_csv('signals.csv', index=False)
-        
+              
         fig, ax1 = plt.subplots(figsize=(14, 7))
         
         ax1.plot(df['Date'], df['Close'], label='Close Price', color='blue', linewidth=1)
