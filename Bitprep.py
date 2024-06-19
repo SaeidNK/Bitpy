@@ -60,7 +60,7 @@ df.dropna(inplace=True)
 selected_features = ['Adj Close', 'Volume', 'SMA_10', 'EMA_10', 'RSI', 'MACD',
                      'lag_1', 'lag_2', 'lag_3', 'lag_4', 'lag_5',
                      'rolling_mean_5', 'rolling_mean_10', 'rolling_mean_20',
-                     'rolling_std_5', 'rolling_std_10', 'rolling_std_20', 'Close']
+                     'rolling_std_5', 'rolling_std_10', 'rolling_std_20', 'Close', 'High', 'Low']
 df = df[selected_features]
 
 # Save the date column separately

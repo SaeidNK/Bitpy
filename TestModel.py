@@ -2,7 +2,9 @@ import pandas as pd
 from joblib import load
 from sklearn.metrics import mean_squared_error, r2_score
 import matplotlib.pyplot as plt
+import subprocess
 
+result = subprocess.run(['python', 'Bitprep.py'], capture_output=True, text=True)
 # Load the preprocessed data
 data = pd.read_csv("preprocessed_Bitdata.csv")
 

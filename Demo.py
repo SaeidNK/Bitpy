@@ -107,7 +107,8 @@ def apply_trading_strategy(df):
     if df is not None:
         df = calculate_indicators(df)
         X_test = df.drop(columns=["Close", "Date"]).tail(300)
-        df['Predictions'] = ridge_regression.predict(X_test)
+        df['Predictions'] = np.nan
+        df.loc[df.index[-300:], 'Predictions'] = ridge_regression.predict(X_test)
 
         # Calculate volume threshold before using it
         volume_threshold = df['Volume'].quantile(0.20)  # Using 20th percentile as threshold
@@ -160,7 +161,7 @@ def apply_trading_strategy(df):
         print("Dataframe is None. Skipping strategy application.")
         return df
 
-def display_signals(df, live_price=None, live_prediction=None):
+def display_signals(df, live_price=None):
     if df is not None:
         last_month = datetime.now() - timedelta(days=30)
         signals = df[(df['Signal'] == 1) & (df['Date'] >= last_month)]
@@ -195,10 +196,6 @@ def display_signals(df, live_price=None, live_prediction=None):
         ax2.plot(df['Date'], df['Predictions'], label='Predicted Price', linestyle='--', color='orange')
         ax2.set_ylabel('Predicted Price', color='orange')
         ax2.tick_params(axis='y', labelcolor='orange')
-        
-        # Plot Live Prediction
-        if live_prediction is not None:
-            ax2.scatter([datetime.now()], [live_prediction], marker='x', color='magenta', label='Live Prediction', alpha=1)
         
         # Title and Legend
         fig.suptitle('Close Price with Buy Signals and Predictions')
@@ -237,15 +234,19 @@ def trading_bot():
                 print(f"Live Price: {live_price}")
 
                 # Append live price to the dataframe
-                new_row = pd.DataFrame({'Date': [datetime.now()], 'Close': [live_price], 'Volume': [df['Volume'].mean()]})
+                new_row = pd.DataFrame({'Date': [datetime.now()], 'Close': [live_price], 'Volume': [df['Volume'].mean()], 'Predictions': [None]})
                 df = pd.concat([df, new_row], ignore_index=True)
 
                 # Recalculate indicators and predict
-                df = calculate_indicators(df)
+                #df = calculate_indicators(df)
                 data = pd.read_csv("preprocessed_Bitdata.csv")
                 X_test = data.drop(columns=["Close", "Date"]).tail(100)
+                #X_test = df.drop(columns=["Close", "Date"]).tail(100)
                 live_prediction = ridge_regression.predict(X_test)[0]
                 print(f"Live Prediction: {live_prediction}")
+
+                # Append the live prediction to the dataframe
+                df.loc[df.index[-1], 'Predictions'] = live_prediction
 
                 # Check if new signals should be generated
                 current_conditions = {
@@ -273,7 +274,7 @@ def trading_bot():
                             print(f"{condition}: {met}, Value: {df.iloc[-1][column_name]}")
                         
                 # Call display_signals with live data
-                display_signals(df, live_price=live_price, live_prediction=live_prediction)
+                display_signals(df, live_price=live_price)
             time.sleep(60)  # Check live price every minute
         except Exception as e:
             print(f"An error occurred: {e}")
