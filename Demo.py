@@ -34,7 +34,6 @@ def get_market_data(days=30):
     end_time = int(time.time() * 1000)
     start_time = end_time - (days * 24 * 60 * 60 * 1000)
 
-    # Fetch candlestick data for the last `days` days
     response = requests.get(BASE_URL + 'public/get-candlestick', params={'instrument_name': symbol, 'timeframe': '1D', 'start_time': start_time, 'end_time': end_time})
     candlestick_data = response.json()
 
@@ -43,7 +42,6 @@ def get_market_data(days=30):
         df = pd.DataFrame(data)
         df['t'] = pd.to_datetime(df['t'], unit='ms', origin='unix', errors='coerce')
         df.rename(columns={'t': 'Date', 'o': 'Open', 'h': 'High', 'l': 'Low', 'c': 'Close', 'v': 'Volume'}, inplace=True)
-        # Convert columns to numeric types
         df['Open'] = pd.to_numeric(df['Open'])
         df['High'] = pd.to_numeric(df['High'])
         df['Low'] = pd.to_numeric(df['Low'])
@@ -55,7 +53,6 @@ def get_market_data(days=30):
         return None
 
 def calculate_indicators(df):
-    # Calculate technical indicators
     df['lag_1'] = df['Close'].shift(1)
     df['lag_2'] = df['Close'].shift(2)
     df['lag_3'] = df['Close'].shift(3)
@@ -70,29 +67,24 @@ def calculate_indicators(df):
     df['SMA_10'] = df['Close'].rolling(window=10).mean()
     df['EMA_10'] = df['Close'].ewm(span=10, adjust=False).mean()
     
-    # Calculate RSI
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
     
-    # Calculate MACD
     short_ema = df['Close'].ewm(span=12, adjust=False).mean()
     long_ema = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = short_ema - long_ema
     
-    df['Adj Close'] = df['Close']  # Assuming 'Adj Close' is same as 'Close' for this context
+    df['Adj Close'] = df['Close']
     
-    # Calculate ATR (Average True Range) for dynamic stop loss and take profit levels
     df['TR'] = np.maximum((df['High'] - df['Low']), np.maximum(abs(df['High'] - df['Close'].shift(1)), abs(df['Low'] - df['Close'].shift(1))))
     df['ATR'] = df['TR'].rolling(window=14).mean()
 
-    # Calculate Bollinger Bands
     df['Upper Band'] = df['rolling_mean_20'] + (df['rolling_std_20'] * 2)
     df['Lower Band'] = df['rolling_mean_20'] - (df['rolling_std_20'] * 2)
 
-    # Calculate ADX (Average Directional Index)
     df['+DM'] = np.where((df['High'] - df['High'].shift(1)) > (df['Low'].shift(1) - df['Low']), df['High'] - df['High'].shift(1), 0)
     df['-DM'] = np.where((df['Low'].shift(1) - df['Low']) > (df['High'] - df['High'].shift(1)), df['Low'].shift(1) - df['Low'], 0)
     df['TR'] = np.maximum((df['High'] - df['Low']), np.maximum(abs(df['High'] - df['Close'].shift(1)), abs(df['Low'] - df['Close'].shift(1))))
@@ -110,49 +102,40 @@ def apply_trading_strategy(df):
         df['Predictions'] = np.nan
         df.loc[df.index[-300:], 'Predictions'] = ridge_regression.predict(X_test)
 
-        # Calculate volume threshold before using it
-        volume_threshold = df['Volume'].quantile(0.20)  # Using 20th percentile as threshold
+        volume_threshold = df['Volume'].quantile(0.20)
 
-        # Generate buy (1) signals based on model predictions and Bollinger Bands confirmation
         df['Signal'] = 0
         df.loc[(df['Predictions'] > df['Close']) & 
                (df['Close'] > df['SMA_10']) & 
                (df['Close'] < df['Upper Band']) & 
                (df['ADX'] > 20) & 
                (df['RSI'] < 70) & 
-               (df['Volume'] > volume_threshold), 'Signal'] = 1  # Added RSI and volume filter
+               (df['Volume'] > volume_threshold), 'Signal'] = 1
 
-        # Apply a smoothing filter to reduce noise (e.g., exponential moving average on the signals)
-        df['Signal'] = df['Signal'].ewm(span=3, adjust=False).mean().round()  # Smoothing the signal
+        df['Signal'] = df['Signal'].ewm(span=3, adjust=False).mean().round()
 
-        # Increase the stop loss multiplier
-        stop_loss_multiplier = 3  # Increased stop loss multiplier to 3 times the ATR
-        take_profit_multiplier = 2  # Adjust take profit multiplier if needed
+        stop_loss_multiplier = 3
+        take_profit_multiplier = 2
 
-        # Calculate dynamic take profit and stop loss levels using ATR
         df['Take Profit'] = df['Close'] + df['ATR'] * take_profit_multiplier
         df['Stop Loss'] = df['Close'] - df['ATR'] * stop_loss_multiplier
 
-        # Calculate the amount to buy
         df['Amount to Buy'] = (available_capital * risk_per_trade) / (df['Close'] - df['Stop Loss'])
 
-        # Calculate the possible profit percentage
         df['Possible Profit %'] = ((df['Take Profit'] - df['Close']) / df['Close']) * 100
 
-        # Implement a volatility filter to avoid trading during high volatility periods
-        volatility_threshold = df['ATR'].mean() * 1.5  # Example threshold; adjust as needed
+        volatility_threshold = df['ATR'].mean() * 1.5
         df.loc[df['ATR'] > volatility_threshold, 'Signal'] = 0
 
-        # Identify correct and false buy signals
         df['Correct Signal'] = np.nan
         for i in range(len(df)):
             if df.loc[i, 'Signal'] == 1:
                 for j in range(i + 1, len(df)):
                     if df.loc[j, 'High'] >= df.loc[i, 'Take Profit']:
-                        df.loc[i, 'Correct Signal'] = 1  # Cast to int
+                        df.loc[i, 'Correct Signal'] = 1
                         break
                     if df.loc[j, 'Low'] <= df.loc[i, 'Stop Loss']:
-                        df.loc[i, 'Correct Signal'] = 0  # Cast to int
+                        df.loc[i, 'Correct Signal'] = 0
                         break
 
         print("Applied trading strategy")
@@ -161,49 +144,99 @@ def apply_trading_strategy(df):
         print("Dataframe is None. Skipping strategy application.")
         return df
 
+
+def evaluate_trading_bot(df):
+    if df is not None:
+        # Filter the DataFrame for signals
+        signals = df[df['Signal'] == 1]
+        
+        # Calculate total and average profit/loss
+        total_profit = signals['Take Profit'].sum() - signals['Stop Loss'].sum()
+        average_profit = total_profit / len(signals) if len(signals) > 0 else 0
+        
+        # Calculate win rate
+        win_rate = signals['Correct Signal'].mean()
+        
+        # Calculate maximum drawdown
+        rolling_max = df['Close'].cummax()
+        drawdown = (df['Close'] - rolling_max) / rolling_max
+        max_drawdown = drawdown.min()
+        
+        # Print evaluation metrics
+        print(f"Total Profit: {total_profit:.2f}")
+        print(f"Average Profit: {average_profit:.2f}")
+        print(f"Win Rate: {win_rate:.2%}")
+        print(f"Maximum Drawdown: {max_drawdown:.2%}")
+    else:
+        print("No data to evaluate.")
+
+
+
+
+
+
+
+
 def display_signals(df, live_price=None):
     if df is not None:
         last_month = datetime.now() - timedelta(days=30)
         signals = df[(df['Signal'] == 1) & (df['Date'] >= last_month)]
         print("Generated Signals for Last Month:")
-        signals_to_print = signals[['Date', 'Volume', 'Close', 'Take Profit', 'Stop Loss', 'Amount to Buy', 'Possible Profit %', 'Correct Signal', 'Predictions']]
+        signals_to_print = signals[['Date', 'Volume', 'Close', 'Take Profit', 'Stop Loss', 'Amount to Buy', 'Possible Profit %', 'Correct Signal']]
         print(signals_to_print)
         
-        # Save the signals to a CSV file
         signals_to_print.to_csv('signals.csv', index=False)
         
-        # Plotting the signals on a chart
         fig, ax1 = plt.subplots(figsize=(14, 7))
         
-        # Plot Close Price
-        ax1.plot(df['Date'], df['Close'], label='Close Price', color='blue')
+        ax1.plot(df['Date'], df['Close'], label='Close Price', color='blue', linewidth=1)
         ax1.set_xlabel('Date')
         ax1.set_ylabel('Close Price', color='blue')
         ax1.tick_params(axis='y', labelcolor='blue')
         
-        # Plot Correct and False Buy Signals
+        # Add horizontal lines at specific price intervals (e.g., 55000, 55500, 56000, ...)
+        min_price = df['Close'].min()
+        max_price = df['Close'].max()
+        price_increment = 500
+        start_price = int(min_price - (min_price % price_increment)) if min_price % price_increment != 0 else int(min_price)
+        
+        for price in range(start_price, int(max_price) + price_increment, price_increment):
+            ax1.axhline(y=price, color='gray', linestyle='--', linewidth=0.5)
+        
         correct_signals = df[df['Correct Signal'] == 1]
         false_signals = df[df['Correct Signal'] == 0]
         ax1.scatter(correct_signals['Date'], correct_signals['Close'], marker='^', color='green', label='Correct Buy Signal', alpha=1)
         ax1.scatter(false_signals['Date'], false_signals['Close'], marker='v', color='red', label='False Buy Signal', alpha=1)
         
-        # Plot Live Price
+        for idx, row in correct_signals.iterrows():
+            ax1.annotate(f"Buy\nTP: {row['Take Profit']:.2f}\nSL: {row['Stop Loss']:.2f}",
+                         (row['Date'], row['Close']),
+                         textcoords="offset points",
+                         xytext=(0, 10),  # adjust annotation position
+                         ha='center',
+                         fontsize=8,
+                         color='green',
+                         bbox=dict(facecolor='white', alpha=0.6))
+        
+        for idx, row in false_signals.iterrows():
+            ax1.annotate(f"Buy\nTP: {row['Take Profit']:.2f}\nSL: {row['Stop Loss']:.2f}",
+                         (row['Date'], row['Close']),
+                         textcoords="offset points",
+                         xytext=(0, 10),  # adjust annotation position
+                         ha='center',
+                         fontsize=8,
+                         color='red',
+                         bbox=dict(facecolor='white', alpha=0.6))
+        
         if live_price is not None:
             ax1.scatter([datetime.now()], [live_price], marker='o', color='blue', label='Live Price', alpha=1)
         
-        # Create another y-axis to plot the Predictions
-        ax2 = ax1.twinx()
-        ax2.plot(df['Date'], df['Predictions'], label='Predicted Price', linestyle='--', color='orange')
-        ax2.set_ylabel('Predicted Price', color='orange')
-        ax2.tick_params(axis='y', labelcolor='orange')
-        
-        # Title and Legend
-        fig.suptitle('Close Price with Buy Signals and Predictions')
+        fig.suptitle('Close Price with Buy Signals')
         fig.legend(loc='upper left', bbox_to_anchor=(0.1,0.9))
         
         plt.xticks(rotation=45)
         plt.tight_layout()
-        plt.savefig('signals_chart.png')  # Save the chart as a PNG file
+        plt.savefig('signals_chart.png')
         plt.show()
     else:
         print("No data to display signals.")
@@ -214,7 +247,7 @@ def get_live_price():
 
     if 'result' in ticker_data and 'data' in ticker_data['result']:
         data = ticker_data['result']['data'][0]
-        return float(data['a'])  # ask price
+        return float(data['a'])
     else:
         print("Failed to fetch ticker data.")
         return None
@@ -223,7 +256,6 @@ def trading_bot():
     df = get_market_data(days=30)
     if df is not None:
         df = apply_trading_strategy(df)
-        #display_signals(df)
     else:
         print("Failed to fetch market data. Skipping this iteration.")
 
@@ -233,22 +265,16 @@ def trading_bot():
             if live_price is not None:
                 print(f"Live Price: {live_price}")
 
-                # Append live price to the dataframe
                 new_row = pd.DataFrame({'Date': [datetime.now()], 'Close': [live_price], 'Volume': [df['Volume'].mean()], 'Predictions': [None]})
                 df = pd.concat([df, new_row], ignore_index=True)
 
-                # Recalculate indicators and predict
-                #df = calculate_indicators(df)
                 data = pd.read_csv("preprocessed_Bitdata.csv")
                 X_test = data.drop(columns=["Close", "Date"]).tail(100)
-                #X_test = df.drop(columns=["Close", "Date"]).tail(100)
                 live_prediction = ridge_regression.predict(X_test)[0]
                 print(f"Live Prediction: {live_prediction}")
 
-                # Append the live prediction to the dataframe
                 df.loc[df.index[-1], 'Predictions'] = live_prediction
 
-                # Check if new signals should be generated
                 current_conditions = {
                     "Prediction > Price": live_prediction > live_price,
                     "Price > SMA_10": live_price > df.iloc[-1]['SMA_10'],
@@ -263,7 +289,6 @@ def trading_bot():
                 else:
                     unmet_conditions = [condition for condition, met in current_conditions.items() if not met]
                     print(f"No new signal due to: {', '.join(unmet_conditions)}")
-                    # Display the values of the variables
                     for condition, met in current_conditions.items():
                         column_name = condition.split(' ')[0]
                         if column_name == 'Prediction':
@@ -273,12 +298,13 @@ def trading_bot():
                         else:
                             print(f"{condition}: {met}, Value: {df.iloc[-1][column_name]}")
                         
-                # Call display_signals with live data
                 display_signals(df, live_price=live_price)
-            time.sleep(60)  # Check live price every minute
+                # Assuming df is the DataFrame with applied trading strategy
+                evaluate_trading_bot(df)
+            time.sleep(60)
         except Exception as e:
             print(f"An error occurred: {e}")
-            time.sleep(60)  # Wait for 1 minute before retrying
+            time.sleep(60)
 
 if __name__ == "__main__":
     trading_bot()
