@@ -92,6 +92,10 @@ def calculate_indicators(df):
     df['-DI'] = 100 * (df['-DM'].ewm(alpha=1/14).mean() / df['TR'].ewm(alpha=1/14).mean())
     df['DX'] = 100 * np.abs((df['+DI'] - df['-DI']) / (df['+DI'] + df['-DI']))
     df['ADX'] = df['DX'].ewm(alpha=1/14).mean()
+    df['SMA_10'] = df['Close'].rolling(window=10).mean()
+    df['SMA_20'] = df['Close'].rolling(window=20).mean()
+    df['EMA_10'] = df['Close'].ewm(span=10, adjust=False).mean()
+    df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
 
     return df
 
@@ -176,6 +180,22 @@ def evaluate_trading_bot(df):
         print("No data to evaluate.")
 
 
+def plot_trend(df):
+    plt.figure(figsize=(14, 7))
+    plt.plot(df['Date'], df['Close'], label='Close Price', color='blue')
+    plt.plot(df['Date'], df['SMA_10'], label='10-day SMA', color='orange')
+    plt.plot(df['Date'], df['SMA_20'], label='20-day SMA', color='green')
+    plt.plot(df['Date'], df['EMA_10'], label='10-day EMA', color='red')
+    plt.plot(df['Date'], df['EMA_20'], label='20-day EMA', color='purple')
+    
+    plt.xlabel('Date')
+    plt.ylabel('Price')
+    plt.title(f'{symbol} Price Trend')
+    plt.legend()
+    plt.grid(True)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
 
 
 
@@ -192,10 +212,10 @@ def display_signals(df, live_price=None):
         ax1.set_ylabel('Close Price', color='blue')
         ax1.tick_params(axis='y', labelcolor='blue')
         
-        # Add horizontal lines at specific price intervals (e.g., 55000, 55500, 56000, ...)
+        # Add horizontal lines
         min_price = df['Close'].min()
         max_price = df['Close'].max()
-        price_increment = 500
+        price_increment = 5000
         start_price = int(min_price - (min_price % price_increment)) if min_price % price_increment != 0 else int(min_price)
         
         for price in range(start_price, int(max_price) + price_increment, price_increment):
@@ -205,7 +225,8 @@ def display_signals(df, live_price=None):
         false_signals = df[df['Correct Signal'] == 0]
         ax1.scatter(correct_signals['Date'], correct_signals['Close'], marker='^', color='green', label='Correct Buy Signal', alpha=1)
         ax1.scatter(false_signals['Date'], false_signals['Close'], marker='v', color='red', label='False Buy Signal', alpha=1)
-        
+        plt.plot(df['Date'], df['SMA_20'], label='20-day SMA', color='green')
+        plt.plot(df['Date'], df['EMA_10'], label='10-day EMA', color='red')
         for idx, row in correct_signals.iterrows():
             ax1.annotate(f"Buy\nTP: {row['Take Profit']:.2f}\nSL: {row['Stop Loss']:.2f}",
                          (row['Date'], row['Close']),
@@ -264,7 +285,12 @@ def trading_bot():
                 print(f"Live Price: {live_price}")
 
                 new_row = pd.DataFrame({'Date': [datetime.now()], 'Close': [live_price], 'Volume': [df['Volume'].mean()], 'Predictions': [None]})
-                df = pd.concat([df, new_row], ignore_index=True)
+                
+                # Exclude empty or all-NA entries
+                new_row = new_row.dropna(how='all')
+
+                if not new_row.empty:
+                    df = pd.concat([df, new_row], ignore_index=True)
 
                 data = pd.read_csv("preprocessed_Bitdata.csv")
                 X_test = data.drop(columns=["Close", "Date"]).tail(100)
@@ -297,12 +323,11 @@ def trading_bot():
                             print(f"{condition}: {met}, Value: {df.iloc[-1][column_name]}")
                         
                 display_signals(df, live_price=live_price)
-                # Assuming df is the DataFrame with applied trading strategy
-                evaluate_trading_bot(df)
             time.sleep(60)
         except Exception as e:
             print(f"An error occurred: {e}")
             time.sleep(60)
+
 
 if __name__ == "__main__":
     trading_bot()
