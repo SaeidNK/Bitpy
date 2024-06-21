@@ -30,6 +30,9 @@ symbol = 'BTC_USDT'
 risk_per_trade = 0.02  # 2% of available capital
 available_capital = 10000  # Total capital available for trading
 
+stop_loss_multiplier = 2
+take_profit_multiplier = 1
+
 def get_market_data(days=30):
     end_time = int(time.time() * 1000)
     start_time = end_time - (days * 24 * 60 * 60 * 1000)
@@ -118,9 +121,6 @@ def apply_trading_strategy(df):
 
         df['Signal'] = df['Signal'].ewm(span=3, adjust=False).mean().round()
         
-        stop_loss_multiplier = 2
-        take_profit_multiplier = 1
-
         df['Take Profit'] = df['Close'] + df['ATR'] * take_profit_multiplier
         df['Stop Loss'] = df['Close'] - df['ATR'] * stop_loss_multiplier
 
@@ -132,6 +132,7 @@ def apply_trading_strategy(df):
         df.loc[df['ATR'] > volatility_threshold, 'Signal'] = 0
 
         df['Correct Signal'] = np.nan
+        df['Current Signal'] = 0
         for i in range(len(df)):
             if df.loc[i, 'Signal'] == 1:
                 for j in range(i + 1, len(df)):
@@ -141,6 +142,13 @@ def apply_trading_strategy(df):
                     if df.loc[j, 'Low'] <= df.loc[i, 'Stop Loss']:
                         df.loc[i, 'Correct Signal'] = 0
                         break
+                if pd.isna(df.loc[i, 'Correct Signal']):
+                    df.loc[i, 'Current Signal'] = 1
+
+        # Mark the most recent signal as current
+        if df['Current Signal'].sum() > 0:
+            df.loc[df[df['Current Signal'] == 1].index[-1], 'Current Signal'] = 1
+            df.loc[df.index[:-1], 'Current Signal'] = 0
 
         # Save the signals to a CSV file
         signals = df[df['Signal'] == 1]
@@ -152,7 +160,6 @@ def apply_trading_strategy(df):
     else:
         print("Dataframe is None. Skipping strategy application.")
         return df
-
 
 def evaluate_trading_bot(df):
     if df is not None:
@@ -179,7 +186,6 @@ def evaluate_trading_bot(df):
     else:
         print("No data to evaluate.")
 
-
 def plot_trend(df):
     plt.figure(figsize=(14, 7))
     plt.plot(df['Date'], df['Close'], label='Close Price', color='blue')
@@ -197,14 +203,8 @@ def plot_trend(df):
     plt.tight_layout()
     plt.show()
 
-
-
-
-
-
 def display_signals(df, live_price=None):
     if df is not None:
-              
         fig, ax1 = plt.subplots(figsize=(14, 7))
         
         ax1.plot(df['Date'], df['Close'], label='Close Price', color='blue', linewidth=1)
@@ -223,10 +223,15 @@ def display_signals(df, live_price=None):
         
         correct_signals = df[df['Correct Signal'] == 1]
         false_signals = df[df['Correct Signal'] == 0]
+        current_signals = df[df['Current Signal'] == 1]
+        
         ax1.scatter(correct_signals['Date'], correct_signals['Close'], marker='^', color='green', label='Correct Buy Signal', alpha=1)
         ax1.scatter(false_signals['Date'], false_signals['Close'], marker='v', color='red', label='False Buy Signal', alpha=1)
+        ax1.scatter(current_signals['Date'], current_signals['Close'], marker='o', color='orange', label='Current Signal', alpha=1)
+        
         plt.plot(df['Date'], df['SMA_20'], label='20-day SMA', color='green')
         plt.plot(df['Date'], df['EMA_10'], label='10-day EMA', color='red')
+        
         for idx, row in correct_signals.iterrows():
             ax1.annotate(f"Buy\nTP: {row['Take Profit']:.2f}\nSL: {row['Stop Loss']:.2f}",
                          (row['Date'], row['Close']),
@@ -247,9 +252,19 @@ def display_signals(df, live_price=None):
                          color='red',
                          bbox=dict(facecolor='white', alpha=0.6))
         
+        for idx, row in current_signals.iterrows():
+            ax1.annotate(f"Current\nTP: {row['Take Profit']:.2f}\nSL: {row['Stop Loss']:.2f}",
+                         (row['Date'], row['Close']),
+                         textcoords="offset points",
+                         xytext=(0, 10),  # adjust annotation position
+                         ha='center',
+                         fontsize=8,
+                         color='orange',
+                         bbox=dict(facecolor='white', alpha=0.6))
+        
         if live_price is not None:
             ax1.scatter([datetime.now()], [live_price], marker='o', color='blue', label='Live Price', alpha=1)
-        
+
         fig.suptitle('Close Price with Buy Signals')
         fig.legend(loc='upper left', bbox_to_anchor=(0.1,0.9))
         
@@ -287,7 +302,7 @@ def trading_bot():
                 new_row = pd.DataFrame({'Date': [datetime.now()], 'Close': [live_price], 'Volume': [df['Volume'].mean()], 'Predictions': [None]})
                 
                 # Exclude empty or all-NA entries
-                new_row = new_row.dropna(how='all')
+                new_row = new_row.dropna(axis=1, how='all')
 
                 if not new_row.empty:
                     df = pd.concat([df, new_row], ignore_index=True)
@@ -310,24 +325,23 @@ def trading_bot():
                 
                 if all(current_conditions.values()):
                     print("Conditions met for a new signal.")
+                    live_tp = live_price + df.iloc[-1]['ATR'] * take_profit_multiplier
+                    live_sl = live_price - df.iloc[-1]['ATR'] * stop_loss_multiplier
+                    live_date = datetime.now()
                 else:
-                    unmet_conditions = [condition for condition, met in current_conditions.items() if not met]
-                    print(f"No new signal due to: {', '.join(unmet_conditions)}")
-                    for condition, met in current_conditions.items():
-                        column_name = condition.split(' ')[0]
-                        if column_name == 'Prediction':
-                            print(f"{condition}: {met}, Value: {live_prediction}")
-                        elif column_name == 'Price':
-                            print(f"{condition}: {met}, Value: {live_price}")
-                        else:
-                            print(f"{condition}: {met}, Value: {df.iloc[-1][column_name]}")
-                        
+                    print("No new signal generated.")
+
                 display_signals(df, live_price=live_price)
+
+                # Print the summary of the last generated signal
+                last_signal = df[df['Signal'] == 1].iloc[-1]
+                status = 'Current' if last_signal['Current Signal'] == 1 else ('Correct' if last_signal['Correct Signal'] == 1 else 'False')
+                print(f"Last Generated Signal:\nDate: {last_signal['Date']}\nClose: {last_signal['Close']}\nTP: {last_signal['Take Profit']}\nSL: {last_signal['Stop Loss']}\nStatus: {status}")
+            
             time.sleep(60)
         except Exception as e:
             print(f"An error occurred: {e}")
             time.sleep(60)
-
 
 if __name__ == "__main__":
     trading_bot()
